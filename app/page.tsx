@@ -1,19 +1,35 @@
+"use client";
+
+import { useState } from "react";
 import Form from "./Form";
-import Passage from "./Passage";
+import Leaderboard from "./Leaderboard";
+import { TypingDistance } from "./actions";
 
 export default function Home() {
+  const [results, setResults] = useState<TypingDistance[]>([]);
+
   return (
-    <main className="max-w-2xl px-8 py-8 mx-auto">
-      <h1 className="text-4xl font-semibold leading-normal">
-        <span className="border-b-4 border-[#E6712F]">Type</span> out the
-        following passage
-      </h1>
+    <div className="grid w-screen h-screen grid-cols-2 py-8 text-center">
+      <div className="border-r">
+        <h1 className="text-3xl font-semibold">
+          Create an identity. Let&apos;s{" "}
+          <span className="border-b-4 border-[#E6712F]">type</span>!
+        </h1>
 
-      <br />
-      <Passage />
-      <br />
+        <hr />
+        <br />
 
-      <Form />
-    </main>
+        <Form setResults={setResults} />
+      </div>
+
+      <div className="">
+        <h1 className="text-3xl font-semibold">Leaderboard</h1>
+
+        <hr />
+        <br />
+
+        <Leaderboard results={results} />
+      </div>
+    </div>
   );
 }
