@@ -63,14 +63,13 @@ export const saveData = async (newData: NewRawData[]): Promise<void> => {
     total += diff;
   }
 
+  // Perform a create or update operation on the leaderboard record.
   const rank = await db
     .select()
     .from(leaderboard)
     .where(eq(leaderboard.first_name, first_name));
   if (rank.length === 0) {
-    await db
-      .insert(leaderboard)
-      .values({ first_name: first_name, total, count });
+    await db.insert(leaderboard).values({ first_name, total, count });
   } else {
     await db
       .update(leaderboard)

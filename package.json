@@ -24,6 +24,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",
+    "bun-types": "^1.0.18",
     "drizzle-kit": "^0.20.6",
     "eslint": "^8",
     "eslint-config-next": "14.0.4",
