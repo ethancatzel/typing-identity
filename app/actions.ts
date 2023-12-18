@@ -1,7 +1,8 @@
 "use server";
 
 import { db } from "@/db";
-import { NewRawData, RawData, raw_data } from "@/db/schema";
+import { Leaderboard, NewRawData, leaderboard, raw_data } from "@/db/schema";
+import { and, asc, eq, lt, sql } from "drizzle-orm";
 
 const PASSAGES = [
   "Who washes the windows by Harold the fox.",
@@ -19,51 +20,99 @@ export type TypingDistance = {
   milliseconds: number;
 };
 
-export const saveDataAndGetLeaderboard = async (
-  newData: NewRawData
+// Saves raw keystroke data to the database, and updates the leaderboard.
+export const saveData = async (newData: NewRawData[]): Promise<void> => {
+  if (newData.length === 0) return;
+
+  const records = await db.insert(raw_data).values(newData).returning();
+  // We expect that all the new records are for the same user, and therefore getting any record for
+  // the first_name would suffice. We do need the first record for the timestamp, because we need
+  // to get the previous record for the same user (for calculating diffs).
+  const { first_name, timestamp } = records[0];
+
+  const prevRecord = await db
+    .select()
+    .from(raw_data)
+    .where(
+      and(
+        eq(raw_data.first_name, first_name),
+        lt(raw_data.timestamp, timestamp)
+      )
+    )
+    .orderBy(asc(raw_data.timestamp))
+    .limit(1);
+
+  if (prevRecord.length === 1) {
+    records.unshift(prevRecord[0]);
+  }
+
+  let count = newData.length;
+  // The "total" in the leaderboard is the time diff between each keystroke.
+  let total = 0;
+  for (let i = 0; i < records.length - 1; i++) {
+    const diff =
+      (records[i + 1].timestamp as unknown as Date).valueOf() -
+      (records[i].timestamp as unknown as Date).valueOf();
+
+    // Ignore any adjacent typing that occurs > 5s apart. Assume the user wasn't focused on typing.
+    if (diff > 5000) {
+      count -= 1;
+      continue;
+    }
+
+    total += diff;
+  }
+
+  // Perform a create or update operation on the leaderboard record.
+  const rank = await db
+    .select()
+    .from(leaderboard)
+    .where(eq(leaderboard.first_name, first_name));
+  if (rank.length === 0) {
+    await db.insert(leaderboard).values({ first_name, total, count });
+  } else {
+    await db
+      .update(leaderboard)
+      .set({ total: rank[0].total + total, count: rank[0].count + count })
+      .where(eq(leaderboard.first_name, first_name));
+  }
+};
+
+// Gets a list of users sorted by their score compared to the current users score.
+export const getLeaderboard = async (
+  firstName: string
 ): Promise<TypingDistance[]> => {
-  await db.insert(raw_data).values(newData);
-  const { first_name: firstName } = newData;
+  const userData = await db
+    .select()
+    .from(leaderboard)
+    .where(eq(leaderboard.first_name, firstName));
+  if (userData.length === 0) return [];
 
-  const data = await db.select().from(raw_data).orderBy(raw_data.timestamp);
+  // We minus 1 to the count because the total is the sum of all the diffs (thus we're always
+  // missing one).
+  const curUserScore = userData[0].total / (userData[0].count - 1);
 
-  const userToData = new Map<string, RawData[]>();
-  data.forEach((row) => {
-    if (userToData.get(row.first_name) === undefined) {
-      userToData.set(row.first_name, [row]);
-    } else {
-      userToData.get(row.first_name)!.push(row);
-    }
-  });
+  // We get the top 5 users with better scores, and the top 5 users with worse scores.
+  const better = (await db.execute(
+    sql`select *
+        from ${leaderboard}
+        where ${leaderboard.total}::float / (${leaderboard.count} - 1) < ${curUserScore}
+        LIMIT 5`
+  )) as Leaderboard[];
+  const worst = (await db.execute(
+    sql`select *
+        from ${leaderboard}
+        where ${leaderboard.first_name} != ${userData[0].first_name}
+          and ${leaderboard.total}::float / (${leaderboard.count} - 1) >= ${curUserScore}
+        LIMIT 5`
+  )) as Leaderboard[];
 
-  const userToAvgTyping = new Map<string, number>();
-  Array.from(userToData.keys()).forEach((user) => {
-    const items = userToData.get(user)!;
-
-    let total = 0;
-    let count = 0;
-    for (let i = 0; i < items.length - 1; i++) {
-      const diff =
-        (items[i + 1].timestamp as unknown as Date).valueOf() -
-        (items[i].timestamp as unknown as Date).valueOf();
-
-      // Ignore any adjacent typing that occurs > 5s apart. Assume the user wasn't focused on typing.
-      if (diff > 5000) {
-        continue;
-      }
-
-      total += diff;
-      count += 1;
-    }
-
-    userToAvgTyping.set(user, total / count);
-  });
-
-  const curUserAvgTyping = userToAvgTyping.get(firstName) ?? 0;
-  return Array.from(userToAvgTyping.entries())
+  return [...better, userData[0], ...worst]
     .map((obj) => ({
-      firstName: obj[0] === firstName ? `(You) ${obj[0]}` : obj[0],
-      milliseconds: Math.abs(Math.round(curUserAvgTyping - obj[1])),
+      firstName: obj.first_name,
+      milliseconds: Math.abs(
+        Math.round(curUserScore - obj.total / (obj.count - 1))
+      ),
     }))
     .sort((a, b) => a.milliseconds - b.milliseconds);
 };
