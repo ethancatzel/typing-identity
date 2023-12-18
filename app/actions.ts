@@ -3,8 +3,15 @@
 import { db } from "@/db";
 import { NewRawData, RawData, raw_data } from "@/db/schema";
 
-export const saveData = async (data: NewRawData) => {
-  await db.insert(raw_data).values(data);
+const PASSAGES = [
+  "Who washes the windows by Harold the fox.",
+  "The quick brown fox washes the dishes and stares out Wendy's window.",
+  "Humpdy Dumpty washes windows and jumps over the wall.",
+  "Windows by the sea shore require regular washes to see out.",
+];
+
+export const getRandomPassage = () => {
+  return PASSAGES[Math.floor(Math.random() * PASSAGES.length)];
 };
 
 export type TypingDistance = {
@@ -12,11 +19,12 @@ export type TypingDistance = {
   milliseconds: number;
 };
 
-export const getTypingDistance = async ({
-  firstName,
-}: {
-  firstName: string;
-}): Promise<TypingDistance[]> => {
+export const saveDataAndGetLeaderboard = async (
+  newData: NewRawData
+): Promise<TypingDistance[]> => {
+  await db.insert(raw_data).values(newData);
+  const { first_name: firstName } = newData;
+
   const data = await db.select().from(raw_data).orderBy(raw_data.timestamp);
 
   const userToData = new Map<string, RawData[]>();
@@ -52,13 +60,10 @@ export const getTypingDistance = async ({
   });
 
   const curUserAvgTyping = userToAvgTyping.get(firstName) ?? 0;
-  return (
-    Array.from(userToAvgTyping.entries())
-      .map((obj) => ({
-        firstName: obj[0],
-        milliseconds: Math.abs(Math.round(curUserAvgTyping - obj[1])),
-      }))
-      // .filter((obj) => obj.firstName !== firstName)
-      .sort((a, b) => a.milliseconds - b.milliseconds)
-  );
+  return Array.from(userToAvgTyping.entries())
+    .map((obj) => ({
+      firstName: obj[0] === firstName ? `(You) ${obj[0]}` : obj[0],
+      milliseconds: Math.abs(Math.round(curUserAvgTyping - obj[1])),
+    }))
+    .sort((a, b) => a.milliseconds - b.milliseconds);
 };
