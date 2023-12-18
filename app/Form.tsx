@@ -1,12 +1,15 @@
 "use client";
 
+import { type NewRawData } from "@/db/schema";
+import { debounce } from "lodash";
 import { RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
-  TypingDistance,
+  getLeaderboard,
   getRandomPassage,
-  saveDataAndGetLeaderboard,
+  saveData,
+  type TypingDistance,
 } from "./actions";
 
 type Props = {
@@ -17,11 +20,41 @@ const Form: React.FC<Props> = ({ setResults }) => {
   const [passage, setPassage] = useState<string>("");
   const [firstName, setFirstName] = useState<string>("");
   const [typedPassage, setTypedPassage] = useState<string>("");
+  const [localData, setLocalData] = useState<NewRawData[]>([]);
 
   useEffect(() => {
     const randomPassage = getRandomPassage();
     setPassage(randomPassage);
   }, []);
+
+  const sendData = useCallback(
+    (data: NewRawData[]) => {
+      saveData(data)
+        .then(() => getLeaderboard(firstName))
+        .then(setResults);
+      setLocalData([]);
+    },
+    [firstName, setResults]
+  );
+
+  const sendDataDebounce = useMemo(
+    () => debounce((data) => sendData(data), 1500),
+    [sendData]
+  );
+
+  useEffect(() => {
+    // To minimise network requests, and maximise user experience, we send raw data to the server on
+    // two conditions:
+    // 1. The user has typed 15 characters.
+    // 2. The user has stopped typing for 1.5 seconds.
+    if (localData.length >= 15) {
+      sendData(localData);
+      sendDataDebounce.cancel();
+      // Only debounce if the user has typed something.
+    } else if (localData.length >= 1) {
+      sendDataDebounce(localData);
+    }
+  }, [localData, sendData, sendDataDebounce]);
 
   return (
     <form className="flex flex-col px-8 space-y-8">
@@ -73,14 +106,17 @@ const Form: React.FC<Props> = ({ setResults }) => {
               }
             }}
             onKeyDown={(e) => {
+              // Only add to data if the user has entered their name.
+              // This is checked in the onChange event above.
               if (firstName.trim().length > 0) {
-                saveDataAndGetLeaderboard({
-                  first_name: firstName,
-                  char: e.key,
-                  timestamp: new Date().toISOString(),
-                }).then((results) => {
-                  setResults(results);
-                });
+                setLocalData((prev) => [
+                  ...prev,
+                  {
+                    first_name: firstName,
+                    char: e.key,
+                    timestamp: new Date().toISOString(),
+                  },
+                ]);
               }
             }}
             value={typedPassage}
